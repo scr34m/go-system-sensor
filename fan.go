@@ -12,12 +12,6 @@ import (
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
-type fanConfigNode struct {
-	name    string
-	pathPWM string
-	pathRPM string
-}
-
 type fanNode struct {
 	name      string
 	unique_id string
@@ -115,30 +109,30 @@ func fanPublishLoop() {
 	}
 }
 
-func fanConfig(system_name string, device map[string]interface{}, configs []fanConfigNode) {
+func fanConfig(system_name string, device map[string]interface{}, configs []ConfigFanEntity) {
 	for _, configNode := range configs {
 
-		unique_id := strings.ReplaceAll(strings.ToLower(configNode.name), " ", "_")
+		unique_id := strings.ReplaceAll(strings.ToLower(configNode.Name), " ", "_")
 
 		node1 := fanNode{
-			name:        configNode.name,
+			name:        configNode.Name,
 			unique_id:   unique_id,
 			kind:        "fan",
 			state_topic: fmt.Sprintf("sensors/system/%s/%s/on/state", system_name, unique_id),
-			pathPWM:     configNode.pathPWM,
+			pathPWM:     configNode.PathPWM,
 		}
-		if configNode.pathPWM != "" {
+		if configNode.PathPWM != "" {
 			node1.percentage_command_topic = fmt.Sprintf("sensors/system/%s/%s/speed/percentage", system_name, unique_id)
 			node1.percentage_state_topic = fmt.Sprintf("sensors/system/%s/%s/speed/percentage_state", system_name, unique_id)
 		}
 		fanNodes = append(fanNodes, &node1)
 
 		node2 := fanNode{
-			name:        fmt.Sprintf("%s RPM", configNode.name),
+			name:        fmt.Sprintf("%s RPM", configNode.Name),
 			unique_id:   unique_id,
 			kind:        "rpm",
 			state_topic: fmt.Sprintf("sensors/system/%s/%s/speed/rpm", system_name, unique_id),
-			pathRPM:     configNode.pathRPM,
+			pathRPM:     configNode.PathRPM,
 		}
 		fanNodes = append(fanNodes, &node2)
 	}

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
 
+	"github.com/BurntSushi/toml"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -18,32 +21,42 @@ func setupMQTT() {
 	opts.AddBroker(mqttBroker)
 	opts.SetClientID(clientID)
 	opts.SetDefaultPublishHandler(func(client MQTT.Client, msg MQTT.Message) {
-		log.Printf("Ismeretlen üzenet: %s => %s", msg.Topic(), msg.Payload())
+		log.Printf("Unknown message: %s => %s", msg.Topic(), msg.Payload())
 	})
 
 	mqttClient = MQTT.NewClient(opts)
 	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("MQTT kapcsolódási hiba: %v", token.Error())
+		log.Fatalf("MQTT connect error: %v", token.Error())
 	}
 }
 
 func main() {
 	setupMQTT()
 
-	device := map[string]interface{}{
-		"identifiers":  []string{"hp_server"},
-		"name":         "Server",
-		"manufacturer": "ASUSTeK COMPUTER INC.",
-		"model":        "PRIME H410M-K",
+	f := "go-system-sensor.toml"
+	if _, err := os.Stat(f); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
-	fanConfig("hp_fan", device, []fanConfigNode{
-		{name: "CPU", pathRPM: "/sys/class/hwmon/hwmon2/fan2_input"},
-		{name: "Case", pathPWM: "/sys/class/hwmon/hwmon2/pwm1", pathRPM: "/sys/class/hwmon/hwmon2/fan1_input"},
-	})
+	var c Config
+	_, err := toml.DecodeFile(f, &c)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	device := map[string]interface{}{
+		"identifiers":  c.Device.Identifiers,
+		"name":         c.Device.Name,
+		"manufacturer": c.Device.Manufacturer,
+		"model":        c.Device.Model,
+	}
+
+	fanConfig(c.Fan.Name, device, c.Fan.Entities)
 	go fanPublishLoop()
 
-	tempConfig("hp_temp", device, []string{"/sys/class/hwmon/hwmon1/", "/sys/class/hwmon/hwmon2/"}, []string{"Package", "Core", "SYSTIN", "CPUTIN"})
+	tempConfig(c.Temp.Name, device, c.Temp.Paths, c.Temp.Prefixes)
 	go tempPublishLoop()
 
 	select {}
