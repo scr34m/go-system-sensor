@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "encoding/json"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -46,17 +45,19 @@ func tempPublishLoop() {
 	}
 }
 
-func tempConfig(device map[string]interface{}) {
+func tempConfig(system_name string, device map[string]interface{}, dirs []string, prefixes []string) {
+
 	tempNodes = make(map[string]*tempNode)
-	tempBuild("/sys/class/hwmon/hwmon1/", tempNodes)
-	tempBuild("/sys/class/hwmon/hwmon2/", tempNodes)
+	for _, dir := range dirs {
+		tempBuild(dir, prefixes, tempNodes)
+	}
 
 	for label, temp := range tempNodes {
-		tempNodes[label].state_topic = fmt.Sprintf("sensors/system/hp_temp/%s", temp.unique_id)
+		tempNodes[label].state_topic = fmt.Sprintf("sensors/system/%s/%s", system_name, temp.unique_id)
 
 		config := map[string]interface{}{
 			"name":                label,
-			"unique_id":           fmt.Sprintf("hp_temp_%s", temp.unique_id),
+			"unique_id":           fmt.Sprintf("%s_%s", system_name, temp.unique_id),
 			"state_topic":         temp.state_topic,
 			"unit_of_measurement": "°C",
 			"device_class":        "temperature",
@@ -69,20 +70,21 @@ func tempConfig(device map[string]interface{}) {
 			continue
 		}
 
-		token := mqttClient.Publish(fmt.Sprintf("homeassistant/sensor/hp_temp/%s/config", temp.unique_id), 0, true, payload)
+		token := mqttClient.Publish(fmt.Sprintf("homeassistant/sensor/%s/%s/config", system_name, temp.unique_id), 0, true, payload)
 		token.Wait()
 	}
 }
 
-func tempLabelValidate(label string) bool {
-	if !strings.HasPrefix(label, "Package") && !strings.HasPrefix(label, "Core") && !strings.HasPrefix(label, "SYSTIN") && !strings.HasPrefix(label, "CPUTIN") {
-		return false
-	} else {
-		return true
+func tempLabelValidate(label string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(label, prefix) {
+			return true
+		}
 	}
+	return false
 }
 
-func tempBuild(hwPath string, list map[string]*tempNode) {
+func tempBuild(hwPath string, prefixes []string, list map[string]*tempNode) {
 	err := filepath.Walk(hwPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -102,7 +104,7 @@ func tempBuild(hwPath string, list map[string]*tempNode) {
 		}
 
 		label := strings.TrimSpace(string(labelBytes))
-		if !tempLabelValidate(label) {
+		if !tempLabelValidate(label, prefixes) {
 			return nil
 		}
 

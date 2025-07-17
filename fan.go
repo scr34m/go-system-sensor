@@ -12,14 +12,35 @@ import (
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
-func setFanSpeed(path string, percent int64) {
+type fanConfigNode struct {
+	name    string
+	pathPWM string
+	pathRPM string
+}
+
+type fanNode struct {
+	name      string
+	unique_id string
+	kind      string
+
+	state_topic              string
+	percentage_command_topic string
+	percentage_state_topic   string
+
+	pathPWM string
+	pathRPM string
+}
+
+var fanNodes []*fanNode
+
+func setFanSpeed(node *fanNode, percent int64) {
 	f := fmt.Sprintf("%d\n", percentToPwm(percent))
-	err := ioutil.WriteFile(path, []byte(f), 0644)
+	err := ioutil.WriteFile(node.pathPWM, []byte(f), 0644)
 	if err != nil {
 		log.Printf("Unable to set PWM value: %v", err)
 	} else {
 		log.Printf("New fan speed PWM value: %d", percent)
-		mqttClient.Publish(fanCasePercentageTopic, 0, false, fmt.Sprintf("%d", percent))
+		mqttClient.Publish(node.percentage_state_topic, 0, false, fmt.Sprintf("%d", percent))
 	}
 }
 
@@ -38,16 +59,6 @@ func fanReadPWM(path string) int64 {
 	return val
 }
 
-const (
-	fanCpuStateTopic    = "sensors/system/hp_fan/cpu/on/state"
-	fanCpuRpmStateTopic = "sensors/system/hp_fan/cpu/speed/rpm"
-
-	fanCaseStateTopic             = "sensors/system/hp_fan/case/on/state"
-	fanCasePercentageTopic        = "sensors/system/hp_fan/case/speed/percentage_state"
-	fanCasePercentageCommandTopic = "sensors/system/hp_fan/case/speed/percentage"
-	fanCaseRpmStateTopic          = "sensors/system/hp_fan/case/speed/rpm"
-)
-
 func pwmToPercent(val int64) int64 {
 	return val * 100 / 255
 }
@@ -63,115 +74,115 @@ func onFanSet(client MQTT.Client, msg MQTT.Message) {
 		log.Printf("Not valid percent value: %s", s)
 		return
 	}
-	log.Printf("New percent value: %d", percent)
-	setFanSpeed("/sys/class/hwmon/hwmon2/pwm1", percent)
+
+	for _, node := range fanNodes {
+		if node.percentage_command_topic == msg.Topic() {
+			log.Printf("New percent value: %d", percent)
+			setFanSpeed(node, percent)
+			break
+		}
+	}
 }
 
 func fanPublishLoop() {
-	mqttClient.Subscribe(fanCasePercentageCommandTopic, 0, onFanSet)
-
-	token := mqttClient.Publish(fanCpuStateTopic, 0, false, "ON")
-	token.Wait()
-
-	token = mqttClient.Publish(fanCaseStateTopic, 0, false, "ON")
-	token.Wait()
+	for _, node := range fanNodes {
+		if node.percentage_command_topic != "" {
+			mqttClient.Subscribe(node.percentage_command_topic, 0, onFanSet)
+		}
+	}
 
 	for {
-		// pwm := fanReadPWM("/sys/class/hwmon/hwmon2/pwm2")
-		// mqttClient.Publish(fanCpuStateTopic, 0, false, fmt.Sprintf("%d", pwmToPercent(pwm)))
+		for _, node := range fanNodes {
+			if node.kind == "fan" {
+				token := mqttClient.Publish(node.state_topic, 0, false, "ON")
+				token.Wait()
+			}
 
-		rpm := fanReadPWM("/sys/class/hwmon/hwmon2/fan2_input")
-		token := mqttClient.Publish(fanCpuRpmStateTopic, 0, false, fmt.Sprintf("%d", rpm))
-		token.Wait()
+			if node.pathPWM != "" {
+				value := fanReadPWM(node.pathPWM)
+				token := mqttClient.Publish(node.percentage_state_topic, 0, false, fmt.Sprintf("%d", pwmToPercent(value)))
+				token.Wait()
+			}
 
-		pwm := fanReadPWM("/sys/class/hwmon/hwmon2/pwm1")
-		token = mqttClient.Publish(fanCasePercentageTopic, 0, false, fmt.Sprintf("%d", pwmToPercent(pwm)))
-		token.Wait()
-
-		rpm = fanReadPWM("/sys/class/hwmon/hwmon2/fan1_input")
-		token = mqttClient.Publish(fanCaseRpmStateTopic, 0, false, fmt.Sprintf("%d", rpm))
-		token.Wait()
+			if node.pathRPM != "" {
+				value := fanReadPWM(node.pathRPM)
+				token := mqttClient.Publish(node.state_topic, 0, false, fmt.Sprintf("%d", value))
+				token.Wait()
+			}
+		}
 
 		time.Sleep(10 * time.Second)
 	}
 }
 
-func fanConfig(device map[string]interface{}) {
-	// CPU FAN
-	fanConfig1 := map[string]interface{}{
-		"name":            "CPU FAN",
-		"unique_id":       "hp_fan_cpu",
-		"command_topic":   "dummy",
-		"state_topic":     fanCpuStateTopic,
-		"payload_on":      "ON",
-		"payload_off":     "OFF",
-		"speed_range_min": 1,
-		"speed_range_max": 100,
-		"device":          device,
+func fanConfig(system_name string, device map[string]interface{}, configs []fanConfigNode) {
+	for _, configNode := range configs {
+
+		unique_id := strings.ReplaceAll(strings.ToLower(configNode.name), " ", "_")
+
+		node1 := fanNode{
+			name:        configNode.name,
+			unique_id:   unique_id,
+			kind:        "fan",
+			state_topic: fmt.Sprintf("sensors/system/%s/%s/on/state", system_name, unique_id),
+			pathPWM:     configNode.pathPWM,
+		}
+		if configNode.pathPWM != "" {
+			node1.percentage_command_topic = fmt.Sprintf("sensors/system/%s/%s/speed/percentage", system_name, unique_id)
+			node1.percentage_state_topic = fmt.Sprintf("sensors/system/%s/%s/speed/percentage_state", system_name, unique_id)
+		}
+		fanNodes = append(fanNodes, &node1)
+
+		node2 := fanNode{
+			name:        fmt.Sprintf("%s RPM", configNode.name),
+			unique_id:   unique_id,
+			kind:        "rpm",
+			state_topic: fmt.Sprintf("sensors/system/%s/%s/speed/rpm", system_name, unique_id),
+			pathRPM:     configNode.pathRPM,
+		}
+		fanNodes = append(fanNodes, &node2)
 	}
 
-	payload, err := json.Marshal(fanConfig1)
-	if err != nil {
-		log.Fatalf("Json.Marshal error: %v", err)
+	for _, node := range fanNodes {
+		config := map[string]interface{}{
+			"name":        node.name,
+			"state_topic": node.state_topic,
+			"device":      device,
+		}
+		var config_topic string
+
+		switch node.kind {
+		case "fan":
+			config_topic = fmt.Sprintf("homeassistant/fan/%s/%s/config", system_name, node.unique_id)
+
+			config["unique_id"] = fmt.Sprintf("%s_%s", system_name, node.unique_id)
+			config["command_topic"] = "dummy"
+			if node.percentage_command_topic != "" {
+				config["percentage_command_topic"] = node.percentage_command_topic
+			}
+			if node.percentage_state_topic != "" {
+				config["percentage_state_topic"] = node.percentage_state_topic
+			}
+			config["payload_on"] = "ON"
+			config["payload_off"] = "OFF"
+			config["speed_range_min"] = 1
+			config["speed_range_max"] = 100
+
+		case "rpm":
+			config["unique_id"] = fmt.Sprintf("%s_%s_rpm", system_name, node.unique_id)
+			config["unit_of_measurement"] = "rpm"
+
+			config_topic = fmt.Sprintf("homeassistant/sensor/%s/%s/config", system_name, node.unique_id)
+		default:
+			continue
+		}
+
+		payload, err := json.Marshal(config)
+		if err != nil {
+			log.Fatalf("Json.Marshal error: %v", err)
+		}
+
+		token := mqttClient.Publish(config_topic, 0, true, payload)
+		token.Wait()
 	}
-
-	token := mqttClient.Publish("homeassistant/fan/hp_fan/cpu/config", 0, true, payload)
-	token.Wait()
-
-	fanConfig12 := map[string]interface{}{
-		"name":                "CPU FAN RPM",
-		"unique_id":           "hp_fan_rpm_cpu",
-		"unit_of_measurement": "rpm",
-		"device_class":        nil,
-		"state_topic":         fanCpuRpmStateTopic,
-		"device":              device,
-	}
-
-	payload, err = json.Marshal(fanConfig12)
-	if err != nil {
-		log.Fatalf("Json.Marshal error: %v", err)
-	}
-
-	token = mqttClient.Publish("homeassistant/sensor/hp_fan/cpu_rpm/config", 0, true, payload)
-	token.Wait()
-
-	// Case FAN
-	fanConfig2 := map[string]interface{}{
-		"name":                     "Case FAN",
-		"unique_id":                "hp_fan_case",
-		"command_topic":            "dummy",
-		"percentage_command_topic": fanCasePercentageCommandTopic,
-		"percentage_state_topic":   fanCasePercentageTopic,
-		"state_topic":              fanCaseStateTopic,
-		"payload_on":               "ON",
-		"payload_off":              "OFF",
-		"speed_range_min":          1,
-		"speed_range_max":          100,
-		"device":                   device,
-	}
-
-	payload, err = json.Marshal(fanConfig2)
-	if err != nil {
-		log.Fatalf("Json.Marshal error: %v", err)
-	}
-
-	token = mqttClient.Publish("homeassistant/fan/hp_fan/case/config", 0, true, payload)
-	token.Wait()
-
-	fanConfig22 := map[string]interface{}{
-		"name":                "Case FAN RPM",
-		"unique_id":           "hp_fan_rpm_case",
-		"unit_of_measurement": "rpm",
-		"device_class":        nil,
-		"state_topic":         fanCaseRpmStateTopic,
-		"device":              device,
-	}
-
-	payload, err = json.Marshal(fanConfig22)
-	if err != nil {
-		log.Fatalf("Json.Marshal error: %v", err)
-	}
-
-	token = mqttClient.Publish("homeassistant/sensor/hp_fan/case_rpm/config", 0, true, payload)
-	token.Wait()
 }

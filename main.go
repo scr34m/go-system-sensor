@@ -37,10 +37,13 @@ func main() {
 		"model":        "PRIME H410M-K",
 	}
 
-	fanConfig(device)
+	fanConfig("hp_fan", device, []fanConfigNode{
+		{name: "CPU", pathRPM: "/sys/class/hwmon/hwmon2/fan2_input"},
+		{name: "Case", pathPWM: "/sys/class/hwmon/hwmon2/pwm1", pathRPM: "/sys/class/hwmon/hwmon2/fan1_input"},
+	})
 	go fanPublishLoop()
 
-	tempConfig(device)
+	tempConfig("hp_temp", device, []string{"/sys/class/hwmon/hwmon1/", "/sys/class/hwmon/hwmon2/"}, []string{"Package", "Core", "SYSTIN", "CPUTIN"})
 	go tempPublishLoop()
 
 	select {}
