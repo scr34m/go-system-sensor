@@ -17,6 +17,12 @@ type ConfigTemp struct {
 	Name     string
 	Paths    []string
 	Prefixes []string
+	Entities []ConfigTempEntity
+}
+
+type ConfigTempEntity struct {
+	Name    string
+	Path    string
 }
 
 type ConfigFan struct {

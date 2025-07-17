@@ -1,0 +1,21 @@
+[device]
+identifiers = ["cm5_server"]
+name = "Server"
+manufacturer = "Raspberry Pi"
+model = "Compute Module 5 Rev 1.0"
+
+[temp]
+name = "hp_temp"
+paths = ["/sys/class/hwmon/hwmon1/", "/sys/class/hwmon/hwmon2/"]
+prefixes = ["Package", "Core", "SYSTIN", "CPUTIN"]
+
+[[temp.entities]]
+name = "CPUTIN"
+path = "/sys/class/thermal/thermal_zone0/temp"
+
+[fan]
+name = "cm5_fan"
+
+[[fan.entities]]
+name = "CPU"
+pathrpm = "/sys/class/hwmon/hwmon3/fan1_input"

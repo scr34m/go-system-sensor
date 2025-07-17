@@ -56,7 +56,7 @@ func main() {
 	fanConfig(c.Fan.Name, device, c.Fan.Entities)
 	go fanPublishLoop()
 
-	tempConfig(c.Temp.Name, device, c.Temp.Paths, c.Temp.Prefixes)
+	tempConfig(c.Temp.Name, device, c.Temp.Paths, c.Temp.Prefixes, c.Temp.Entities)
 	go tempPublishLoop()
 
 	select {}

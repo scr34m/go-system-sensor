@@ -45,11 +45,19 @@ func tempPublishLoop() {
 	}
 }
 
-func tempConfig(system_name string, device map[string]interface{}, dirs []string, prefixes []string) {
+func tempConfig(system_name string, device map[string]interface{}, dirs []string, prefixes []string, configs []ConfigTempEntity) {
 
 	tempNodes = make(map[string]*tempNode)
 	for _, dir := range dirs {
 		tempBuild(dir, prefixes, tempNodes)
+	}
+
+	for _, config := range configs {
+		label := config.Name
+		tempNodes[label] = &tempNode{
+			path:      config.Path,
+			unique_id: strings.ReplaceAll(strings.ToLower(label), " ", "_"),
+		}
 	}
 
 	for label, temp := range tempNodes {
