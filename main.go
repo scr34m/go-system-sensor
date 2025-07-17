@@ -1,25 +1,23 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/BurntSushi/toml"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
-)
-
-const (
-	mqttBroker = "tcp://192.168.1.21:1883"
-	clientID   = "go-system-sensor"
+	"github.com/google/uuid"
 )
 
 var mqttClient MQTT.Client
 
-func setupMQTT() {
+func setupMQTT(mqttBroker *string) {
+	id := uuid.New()
 	opts := MQTT.NewClientOptions()
-	opts.AddBroker(mqttBroker)
-	opts.SetClientID(clientID)
+	opts.AddBroker(*mqttBroker)
+	opts.SetClientID(fmt.Sprintf("go-system-sensor-%s", id.String()))
 	opts.SetDefaultPublishHandler(func(client MQTT.Client, msg MQTT.Message) {
 		log.Printf("Unknown message: %s => %s", msg.Topic(), msg.Payload())
 	})
@@ -31,7 +29,11 @@ func setupMQTT() {
 }
 
 func main() {
-	setupMQTT()
+
+	mqttBroker := flag.String("mqtt", "tcp://192.168.1.21:1883", "MQTT server address")
+	flag.Parse()
+
+	setupMQTT(mqttBroker)
 
 	f := "go-system-sensor.toml"
 	if _, err := os.Stat(f); err != nil {
